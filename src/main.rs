@@ -1,4 +1,4 @@
-use glam::f32::Vec3;
+use glam::f32::{Vec2, Vec3};
 use sdl2::event::Event;
 use sdl2::gfx::primitives::DrawRenderer;
 use sdl2::keyboard::Keycode;
@@ -11,7 +11,19 @@ const FOV: f32 = PI / 2.0;
 
 #[derive(Clone, Copy)]
 struct Material {
+    albedo: Vec2,
     diffuse_color: Vec3,
+    specular_exponent: f32,
+}
+
+impl Material {
+    fn new(a: Vec2, c: Vec3, s: f32) -> Self {
+        Material {
+            albedo: a,
+            diffuse_color: c,
+            specular_exponent: s
+        }
+    }
 }
 
 struct Sphere {
@@ -64,21 +76,28 @@ fn scene_intersect(orig: Vec3, dir: Vec3, spheres: &Vec<Sphere>, hit: &mut Vec3,
     sphere_dist < 1000.0 
 }
 
+fn reflect(i: Vec3, n: Vec3) -> Vec3 {
+    i - (n * 2.0) * (i.dot(n))
+}
+
 fn cast_ray(orig: Vec3, dir: Vec3, spheres: &Vec<Sphere>, lights: &Vec<Light>) -> Vec3 {
     let mut point = Vec3::ZERO;
     let mut big_n = Vec3::ZERO;
-    let mut material = Material { diffuse_color: Vec3::ZERO };
+    let mut material = Material::new(Vec2::ZERO, Vec3::ZERO, 0.0);
 
     if !scene_intersect(orig, dir, &spheres, &mut point, &mut big_n, &mut material) {
         return Vec3::new(0.2, 0.7, 0.8); // background material 
     }
     
     let mut diffuse_light_intensity: f32 = 0.0;
+    let mut specular_light_intensity: f32 = 0.0;
     for light in lights.iter() {
         let light_dir: Vec3 = (light.position - point).normalize();
+        
         diffuse_light_intensity += light.intensity * f32::max(0.0, light_dir.dot(big_n));
+        specular_light_intensity += f32::powf(f32::max(0.0, -reflect(-light_dir, big_n).dot(dir)), material.specular_exponent) * light.intensity;
     }
-    return material.diffuse_color * diffuse_light_intensity;
+    return material.diffuse_color * diffuse_light_intensity * material.albedo[0] + Vec3::ONE * specular_light_intensity * material.albedo[1];
 }
 
 fn render(image: &Vec<Vec3>) -> Result<(), String> {
@@ -127,8 +146,8 @@ fn render(image: &Vec<Vec3>) -> Result<(), String> {
 }
 
 fn main() {
-    let ivory = Material { diffuse_color: Vec3::new(0.4, 0.4, 0.3) };
-    let red_rubber = Material { diffuse_color: Vec3::new(0.3, 0.1, 0.1) };
+    let ivory = Material::new(Vec2::new(0.6, 0.3), Vec3::new(0.4, 0.4, 0.3), 50.0);
+    let red_rubber = Material::new(Vec2::new(0.9, 0.1), Vec3::new(0.3, 0.1, 0.1), 10.0);
 
     let spheres = vec![
         Sphere::new(Vec3::new(-3.0,  0.0, -16.0), 2.0, ivory),
@@ -138,7 +157,9 @@ fn main() {
     ];
 
     let lights = vec![
-        Light { position: Vec3::new(-20.0, 20.0, 20.0), intensity: 1.5 },
+        Light { position: Vec3::new(-20.0, 20.0,  20.0), intensity: 1.5 },
+        Light { position: Vec3::new( 30.0, 50.0, -25.0), intensity: 1.8 },
+        Light { position: Vec3::new( 30.0, 20.0,  30.0), intensity: 1.7 },
     ];
 
     let mut image = vec![Vec3::ZERO; WIDTH * HEIGHT];
