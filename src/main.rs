@@ -45,6 +45,11 @@ impl Sphere {
     }
 }
 
+struct Light {
+    position: Vec3,
+    intensity: f32,
+}
+
 fn scene_intersect(orig: Vec3, dir: Vec3, spheres: &Vec<Sphere>, hit: &mut Vec3, big_n: &mut Vec3, material: &mut Material) -> bool {
     let mut sphere_dist: f32 = f32::MAX;
     for sphere in spheres.iter() {
@@ -59,7 +64,7 @@ fn scene_intersect(orig: Vec3, dir: Vec3, spheres: &Vec<Sphere>, hit: &mut Vec3,
     sphere_dist < 1000.0 
 }
 
-fn cast_ray(orig: Vec3, dir: Vec3, spheres: &Vec<Sphere>) -> Vec3 {
+fn cast_ray(orig: Vec3, dir: Vec3, spheres: &Vec<Sphere>, lights: &Vec<Light>) -> Vec3 {
     let mut point = Vec3::ZERO;
     let mut big_n = Vec3::ZERO;
     let mut material = Material { diffuse_color: Vec3::ZERO };
@@ -68,7 +73,12 @@ fn cast_ray(orig: Vec3, dir: Vec3, spheres: &Vec<Sphere>) -> Vec3 {
         return Vec3::new(0.2, 0.7, 0.8); // background material 
     }
     
-    return material.diffuse_color;
+    let mut diffuse_light_intensity: f32 = 0.0;
+    for light in lights.iter() {
+        let light_dir: Vec3 = (light.position - point).normalize();
+        diffuse_light_intensity += light.intensity * f32::max(0.0, light_dir.dot(big_n));
+    }
+    return material.diffuse_color * diffuse_light_intensity;
 }
 
 fn render(image: &Vec<Vec3>) -> Result<(), String> {
@@ -127,6 +137,10 @@ fn main() {
         Sphere::new(Vec3::new( 7.0,  5.0, -18.0), 4.0, ivory),
     ];
 
+    let lights = vec![
+        Light { position: Vec3::new(-20.0, 20.0, 20.0), intensity: 1.5 },
+    ];
+
     let mut image = vec![Vec3::ZERO; WIDTH * HEIGHT];
 
     let mut x: f32;
@@ -137,7 +151,7 @@ fn main() {
             x = (2.0 * (col as f32 + 0.5) / (WIDTH as f32) - 1.0) * (FOV / 2.0).tan() * (WIDTH as f32 / HEIGHT as f32);
             y = -(2.0 * (row as f32 + 0.5) / (HEIGHT as f32) - 1.0) * (FOV / 2.0).tan();
             dir = Vec3::new(x, y, -1.0).normalize();
-            image[row * WIDTH + col] = cast_ray(Vec3::ZERO, dir, &spheres);
+            image[row * WIDTH + col] = cast_ray(Vec3::ZERO, dir, &spheres, &lights);
         }
     }
     
