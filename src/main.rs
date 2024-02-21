@@ -1,4 +1,4 @@
-use glam::f32::Vec3;
+use glam::f32::{Vec3, Vec4};
 use sdl2::event::Event;
 use sdl2::gfx::primitives::DrawRenderer;
 use sdl2::keyboard::Keycode;
@@ -11,14 +11,16 @@ const FOV: f32 = PI / 2.0;
 
 #[derive(Clone, Copy)]
 struct Material {
-    albedo: Vec3,
+    refractive_index: f32,
+    albedo: Vec4,
     diffuse_color: Vec3,
     specular_exponent: f32,
 }
 
 impl Material {
-    fn new(a: Vec3, c: Vec3, s: f32) -> Self {
+    fn new(r: f32, a: Vec4, c: Vec3, s: f32) -> Self {
         Material {
+            refractive_index: r,
             albedo: a,
             diffuse_color: c,
             specular_exponent: s
@@ -80,6 +82,25 @@ fn reflect(i: Vec3, n: Vec3) -> Vec3 {
     i - (n * 2.0) * (i.dot(n))
 }
 
+fn refract(i: Vec3, n: Vec3, refractive_index: f32) -> Vec3 {
+    let mut cosi = -f32::max(-1.0, f32::min(1.0, i.dot(n)));
+    let mut etai: f32 = 1.0;
+    let mut etat: f32 = refractive_index;
+    let mut nn: Vec3 = n;
+    if cosi < 0.0 {
+        cosi = -cosi;
+        std::mem::swap(&mut etai, &mut etat);
+        nn = -n;
+    }
+    let eta: f32 = etai / etat;
+    let k: f32 = 1.0 - eta * eta * (1.0 - cosi * cosi);
+    if k < 0.0 {
+        Vec3::new(0.0, 0.0, 0.0)
+    } else {
+        i * eta + nn * (eta * cosi - f32::sqrt(k))
+    }
+}
+
 // glam doesn't have a `norm` function (or i couldn't find it)
 fn norm(v: Vec3) -> f32 {
     f32::sqrt(v.x * v.x + v.y * v.y + v.z * v.z)
@@ -88,20 +109,20 @@ fn norm(v: Vec3) -> f32 {
 fn cast_ray(orig: Vec3, dir: Vec3, spheres: &Vec<Sphere>, lights: &Vec<Light>, depth: usize) -> Vec3 {
     let mut point = Vec3::ZERO;
     let mut big_n = Vec3::ZERO;
-    let mut material = Material::new(Vec3::ZERO, Vec3::ZERO, 0.0);
+    let mut material = Material::new(0.0, Vec4::ZERO, Vec3::ZERO, 0.0);
 
     if depth > 4 || !scene_intersect(orig, dir, &spheres, &mut point, &mut big_n, &mut material) {
         return Vec3::new(0.2, 0.7, 0.8); // background material 
     }
 
     let reflect_dir = reflect(dir, big_n).normalize();
-    let reflect_orig = if reflect_dir.dot(big_n) < 0.0 {
-        point - big_n * 0.001
-    } else {
-        point + big_n * 0.001
-    };
+    let reflect_orig = if reflect_dir.dot(big_n) < 0.0 { point - big_n * 0.001 } else { point + big_n * 0.001 };
     let reflect_color = cast_ray(reflect_orig, reflect_dir, &spheres, lights, depth + 1);
     
+    let refract_dir = refract(dir, big_n, material.refractive_index).normalize();
+    let refract_orig = if refract_dir.dot(big_n) < 0.0 { point - big_n * 0.001 } else { point + big_n * 0.001 };
+    let refract_color = cast_ray(refract_orig, refract_dir, &spheres, lights, depth + 1);
+
     let mut diffuse_light_intensity: f32 = 0.0;
     let mut specular_light_intensity: f32 = 0.0;
     for light in lights.iter() {
@@ -116,7 +137,7 @@ fn cast_ray(orig: Vec3, dir: Vec3, spheres: &Vec<Sphere>, lights: &Vec<Light>, d
         };
         let mut _point = Vec3::ZERO;
         let mut _big_n = Vec3::ZERO;
-        let mut _material = Material::new(Vec3::ZERO, Vec3::ZERO, 0.0);
+        let mut _material = Material::new(0.0, Vec4::ZERO, Vec3::ZERO, 0.0);
         if scene_intersect(_orig, light_dir, &spheres, &mut _point, &mut _big_n, &mut _material) && norm(_point - _orig) < light_distance {
             continue;
         }
@@ -124,7 +145,7 @@ fn cast_ray(orig: Vec3, dir: Vec3, spheres: &Vec<Sphere>, lights: &Vec<Light>, d
         diffuse_light_intensity += light.intensity * f32::max(0.0, light_dir.dot(big_n));
         specular_light_intensity += f32::powf(f32::max(0.0, -reflect(-light_dir, big_n).dot(dir)), material.specular_exponent) * light.intensity;
     }
-    return material.diffuse_color * diffuse_light_intensity * material.albedo[0] + Vec3::ONE * specular_light_intensity * material.albedo[1] + reflect_color * material.albedo[2];
+    return material.diffuse_color * diffuse_light_intensity * material.albedo[0] + Vec3::ONE * specular_light_intensity * material.albedo[1] + reflect_color * material.albedo[2] + refract_color * material.albedo[3];
 }
 
 fn render(image: &Vec<Vec3>) -> Result<(), String> {
@@ -173,13 +194,14 @@ fn render(image: &Vec<Vec3>) -> Result<(), String> {
 }
 
 fn main() {
-    let ivory      = Material::new(Vec3::new(0.6,  0.3, 0.1), Vec3::new(0.4, 0.4, 0.3),   50.0);
-    let red_rubber = Material::new(Vec3::new(0.9,  0.1, 0.0), Vec3::new(0.3, 0.1, 0.1),   10.0);
-    let mirror     = Material::new(Vec3::new(0.0, 10.0, 0.8), Vec3::new(1.0, 1.0, 1.0), 1425.0);
+    let ivory      = Material::new(1.0, Vec4::new(0.6,  0.3, 0.1, 0.0), Vec3::new(0.4, 0.4, 0.3),   50.0);
+    let glass      = Material::new(1.5, Vec4::new(0.0,  0.5, 0.1, 0.8), Vec3::new(0.6, 0.7, 0.8),  125.0);
+    let red_rubber = Material::new(1.0, Vec4::new(0.9,  0.1, 0.0, 0.0), Vec3::new(0.3, 0.1, 0.1),   10.0);
+    let mirror     = Material::new(1.0, Vec4::new(0.0, 10.0, 0.8, 0.0), Vec3::new(1.0, 1.0, 1.0), 1425.0);
 
     let spheres = vec![
         Sphere::new(Vec3::new(-3.0,  0.0, -16.0), 2.0, ivory),
-        Sphere::new(Vec3::new(-1.0, -1.5, -12.0), 2.0, mirror),
+        Sphere::new(Vec3::new(-1.0, -1.5, -12.0), 2.0, glass),
         Sphere::new(Vec3::new( 1.5, -0.5, -18.0), 3.0, red_rubber),
         Sphere::new(Vec3::new( 7.0,  5.0, -18.0), 4.0, mirror),
     ];
