@@ -80,6 +80,11 @@ fn reflect(i: Vec3, n: Vec3) -> Vec3 {
     i - (n * 2.0) * (i.dot(n))
 }
 
+// glam doesn't have a `norm` function (or i couldn't find it)
+fn norm(v: Vec3) -> f32 {
+    f32::sqrt(v.x * v.x + v.y * v.y + v.z * v.z)
+}
+
 fn cast_ray(orig: Vec3, dir: Vec3, spheres: &Vec<Sphere>, lights: &Vec<Light>) -> Vec3 {
     let mut point = Vec3::ZERO;
     let mut big_n = Vec3::ZERO;
@@ -94,6 +99,20 @@ fn cast_ray(orig: Vec3, dir: Vec3, spheres: &Vec<Sphere>, lights: &Vec<Light>) -
     for light in lights.iter() {
         let light_dir: Vec3 = (light.position - point).normalize();
         
+        
+        let light_distance: f32 = norm(light.position - point);
+        let _orig: Vec3 = if light_dir.dot(big_n) < 0.0 {
+            point - big_n * 0.001
+        } else {
+            point + big_n * 0.001
+        };
+        let mut _point = Vec3::ZERO;
+        let mut _big_n = Vec3::ZERO;
+        let mut _material = Material::new(Vec2::ZERO, Vec3::ZERO, 0.0);
+        if scene_intersect(_orig, light_dir, &spheres, &mut _point, &mut _big_n, &mut _material) && norm(_point - _orig) < light_distance {
+            continue;
+        }
+
         diffuse_light_intensity += light.intensity * f32::max(0.0, light_dir.dot(big_n));
         specular_light_intensity += f32::powf(f32::max(0.0, -reflect(-light_dir, big_n).dot(dir)), material.specular_exponent) * light.intensity;
     }
